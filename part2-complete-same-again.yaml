@@ -1,0 +1,158 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Lab template
+
+Parameters:
+
+  LabVpcCidr:
+    Type: String
+    Default: 10.0.0.0/20
+
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.0.0.0/24
+
+  AmazonLinuxAMIID:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+# does not work in Stockholm region
+
+Resources:
+
+###########
+# VPC with Internet Gateway
+###########
+
+  LabVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref LabVpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-LabVPC"
+
+  LabIGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-LabIGW"
+
+  VPCtoIGWConnection:
+    Type: AWS::EC2::VPCGatewayAttachment
+    DependsOn:
+      - LabIGW
+      - LabVPC
+    Properties:
+      InternetGatewayId: !Ref LabIGW
+      VpcId: !Ref LabVPC
+
+###########
+# Public Route Table
+###########
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    DependsOn: LabVPC
+    Properties:
+      VpcId: !Ref LabVPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-PublicRouteTable"
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn:
+      - PublicRouteTable
+      - LabIGW
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref LabIGW
+      RouteTableId: !Ref PublicRouteTable
+
+###########
+# Public Subnet
+###########
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    DependsOn: LabVPC
+    Properties:
+      VpcId: !Ref LabVPC
+      MapPublicIpOnLaunch: true
+      CidrBlock: !Ref PublicSubnetCidr
+      AvailabilityZone: !Select 
+        - 0
+        - !GetAZs 
+          Ref: AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-PublicSubnet"
+
+  PublicRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn:
+      - PublicRouteTable
+      - PublicSubnet
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet
+
+###########
+# App Security Group
+###########
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: LabVPC
+    Properties:
+      GroupName: !Sub "${AWS::StackName}-App"
+      GroupDescription: Enable access to App
+      VpcId: !Ref LabVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-Site"
+
+###########
+# EC2 Instance
+###########
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      ImageId: !Ref AmazonLinuxAMIID
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref AppSecurityGroup
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          yum update -y
+          yum install -y httpd
+          systemctl start httpd
+          systemctl enable httpd
+          echo "<h1>Hello to the E03B AWS Class</h1>" > /var/www/html/index.html
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-Web Server"
+
+
+###########
+# Outputs
+###########
+
+Outputs:
+
+  LabVPCDefaultSecurityGroup:
+    Value: !Sub "${LabVPC.DefaultSecurityGroup}"
