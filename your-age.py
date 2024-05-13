@@ -8,8 +8,12 @@ def main():
     current_year = datetime.datetime.now().year
     
     name = input("What is your name? ")
-    age = int(input("How old are you? "))
-    
+    try:
+        age = int(input("How old are you? "))
+    except ValueError:
+        print("Please enter a valid age (it should be a number).")
+        return
+
     birth_year = calculate_birth_year(current_year, age)
     
     print(f"Hello, {name}! You were probably born in {birth_year}.")
